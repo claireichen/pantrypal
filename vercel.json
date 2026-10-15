@@ -1,7 +1,3 @@
 {
-  "version": 2,
-  "rewrites": [
-    { "source": "/api/items", "destination": "/api/items.js" },
-    { "source": "/api/health", "destination": "/api/health.js" }
-  ]
+  "version": 2
 }
