@@ -9,6 +9,10 @@ PantryPal is a responsive household food inventory for refrigerator, freezer, an
 - Record quantity, unit, expiration date, and notes
 - Highlight expired items and food that should be used within seven days
 - Filter by storage location and search by ingredient
+- Recommend recipes using food across all storage locations
+- Prioritize recipes that use ingredients nearing expiration
+- Add missing ingredients to a persistent shopping list
+- Save personal recipes in the browser
 - Persist data in SQLite locally or Supabase PostgreSQL in production
 - Run automated validation and database tests in GitHub Actions
 

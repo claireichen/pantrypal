@@ -1,6 +1,20 @@
 'use strict';
 
-const state = { items: [], location: 'all', search: '', deleteId: null };
+const state = {
+  items: [], location: 'all', search: '', deleteId: null,
+  availableOnly: false,
+  customRecipes: readLocal('pantrypal-recipes', []),
+  shopping: readLocal('pantrypal-shopping', [])
+};
+
+const builtInRecipes = [
+  { id: 'vegetable-fried-rice', name: 'Use-It-Up Vegetable Fried Rice', ingredients: ['rice', 'egg', 'carrot', 'peas', 'onion'], directions: 'Sauté the vegetables, add cooked rice, then stir in the egg and season.' },
+  { id: 'spinach-pasta', name: 'Creamy Spinach Pasta', ingredients: ['pasta', 'spinach', 'garlic', 'milk', 'cheese'], directions: 'Cook pasta, wilt spinach and garlic, then combine with milk and cheese.' },
+  { id: 'pantry-chili', name: 'Easy Pantry Chili', ingredients: ['beans', 'tomato', 'onion', 'corn', 'chili powder'], directions: 'Simmer everything together until thick and flavorful.' },
+  { id: 'freezer-smoothie', name: 'Freezer Fruit Smoothie', ingredients: ['frozen fruit', 'banana', 'milk', 'yogurt'], directions: 'Blend all ingredients until smooth.' },
+  { id: 'vegetable-soup', name: 'Clean-Out-the-Fridge Soup', ingredients: ['carrot', 'onion', 'celery', 'broth', 'potato'], directions: 'Chop, combine, and simmer until the vegetables are tender.' },
+  { id: 'quesadilla', name: 'Quick Bean Quesadillas', ingredients: ['tortilla', 'beans', 'cheese', 'salsa'], directions: 'Fill tortillas, toast on both sides, and serve with salsa.' }
+];
 
 const elements = {
   list: document.querySelector('#item-list'),
@@ -20,7 +34,15 @@ const elements = {
   expirationDate: document.querySelector('#expirationDate'),
   notes: document.querySelector('#notes'),
   save: document.querySelector('.save-button'),
-  deleteName: document.querySelector('#delete-name')
+  deleteName: document.querySelector('#delete-name'),
+  recipeDialog: document.querySelector('#recipe-dialog'),
+  recipeForm: document.querySelector('#recipe-form'),
+  recipeList: document.querySelector('#recipe-list'),
+  recipeSummary: document.querySelector('#recipe-summary'),
+  availableOnly: document.querySelector('#available-only'),
+  shoppingList: document.querySelector('#shopping-list'),
+  shoppingEmpty: document.querySelector('#shopping-empty'),
+  shoppingCount: document.querySelector('#shopping-count')
 };
 
 const locationDetails = {
@@ -33,6 +55,29 @@ function escapeHtml(value) {
   const node = document.createElement('div');
   node.textContent = String(value ?? '');
   return node.innerHTML;
+}
+
+function readLocal(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return Array.isArray(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveLocal(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function normalized(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function ingredientMatches(itemName, ingredient) {
+  const item = normalized(itemName);
+  const needed = normalized(ingredient);
+  return item === needed || item.includes(needed) || needed.includes(item);
 }
 
 function formatQuantity(item) {
@@ -99,6 +144,81 @@ function render() {
   for (const location of Object.keys(locationDetails)) {
     document.querySelector(`#${location}-badge`).textContent = state.items.filter((item) => item.location === location).length;
   }
+  renderRecipes();
+}
+
+function allRecipes() {
+  return [...state.customRecipes, ...builtInRecipes];
+}
+
+function recipeDetails(recipe) {
+  const matches = recipe.ingredients.map((ingredient) => ({
+    ingredient,
+    item: state.items.find((candidate) => ingredientMatches(candidate.name, ingredient))
+  }));
+  const available = matches.filter((match) => match.item);
+  const missing = matches.filter((match) => !match.item).map((match) => match.ingredient);
+  const urgent = available.filter((match) => ['soon', 'expired'].includes(dateStatus(match.item.expirationDate).className));
+  const percent = recipe.ingredients.length ? Math.round((available.length / recipe.ingredients.length) * 100) : 0;
+  return { recipe, available, missing, urgent, percent, score: percent + (urgent.length * 8) };
+}
+
+function renderRecipes() {
+  const ranked = allRecipes().map(recipeDetails)
+    .filter((entry) => !state.availableOnly || entry.missing.length === 0)
+    .sort((a, b) => b.score - a.score || a.missing.length - b.missing.length);
+
+  const complete = ranked.filter((entry) => entry.missing.length === 0).length;
+  elements.recipeSummary.textContent = state.items.length
+    ? `${complete} recipe${complete === 1 ? '' : 's'} ready to make · ranked by availability and expiration urgency`
+    : 'Add ingredients to see your best matches.';
+
+  elements.recipeList.innerHTML = ranked.length ? ranked.map((entry, index) => {
+    const { recipe, missing, urgent, percent } = entry;
+    const ready = missing.length === 0;
+    return `
+      <article class="recipe-card ${index === 0 && state.items.length ? 'best-match' : ''}">
+        <div class="recipe-card-top">
+          <div>
+            ${index === 0 && state.items.length ? '<span class="match-label">Best match</span>' : ''}
+            <h3>${escapeHtml(recipe.name)}</h3>
+          </div>
+          <strong class="match-percent">${percent}%</strong>
+        </div>
+        <div class="match-bar" aria-label="${percent}% of ingredients available"><span style="width:${percent}%"></span></div>
+        <p class="ingredient-line"><strong>Needs:</strong> ${recipe.ingredients.map(escapeHtml).join(', ')}</p>
+        ${urgent.length ? `<p class="urgent-note">Use soon: ${urgent.map((match) => escapeHtml(match.item.name)).join(', ')}</p>` : ''}
+        <p class="recipe-status ${ready ? 'ready' : ''}">${ready ? 'You have everything' : `Missing ${missing.length}: ${missing.map(escapeHtml).join(', ')}`}</p>
+        <p class="directions">${escapeHtml(recipe.directions || 'Use your preferred preparation method.')}</p>
+        <div class="recipe-actions">
+          ${missing.length ? `<button class="secondary-button add-missing" data-recipe-id="${escapeHtml(recipe.id)}" type="button">Add missing to list</button>` : '<span class="ready-mark">✓ Ready to cook</span>'}
+          ${recipe.custom ? `<button class="text-button delete-recipe" data-delete-recipe="${escapeHtml(recipe.id)}" type="button">Delete recipe</button>` : ''}
+        </div>
+      </article>`;
+  }).join('') : '<div class="recipe-empty">No recipes match this filter yet.</div>';
+
+  renderShopping();
+}
+
+function addShoppingItems(names) {
+  for (const name of names) {
+    if (!state.shopping.some((item) => normalized(item.name) === normalized(name))) {
+      state.shopping.push({ id: `${Date.now()}-${Math.random()}`, name, done: false });
+    }
+  }
+  saveLocal('pantrypal-shopping', state.shopping);
+  renderShopping();
+}
+
+function renderShopping() {
+  elements.shoppingList.innerHTML = state.shopping.map((item) => `
+    <label class="shopping-item ${item.done ? 'done' : ''}">
+      <input type="checkbox" data-shopping-toggle="${escapeHtml(item.id)}" ${item.done ? 'checked' : ''}>
+      <span>${escapeHtml(item.name)}</span>
+      <button type="button" data-shopping-delete="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
+    </label>`).join('');
+  elements.shoppingEmpty.hidden = state.shopping.length > 0;
+  elements.shoppingCount.textContent = state.shopping.filter((item) => !item.done).length;
 }
 
 function showMessage(text, type = 'error') {
@@ -235,6 +355,79 @@ document.querySelector('#confirm-delete').addEventListener('click', async (event
     elements.deleteDialog.close();
     showMessage(error.message);
   }
+});
+
+document.querySelector('#open-recipe-form').addEventListener('click', () => {
+  elements.recipeForm.reset();
+  elements.recipeDialog.showModal();
+  requestAnimationFrame(() => document.querySelector('#recipe-name').focus());
+});
+document.querySelector('#close-recipe-form').addEventListener('click', () => elements.recipeDialog.close());
+document.querySelector('#cancel-recipe-form').addEventListener('click', () => elements.recipeDialog.close());
+
+elements.recipeForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const name = document.querySelector('#recipe-name').value.trim();
+  const ingredients = document.querySelector('#recipe-ingredients').value.split(',').map((value) => value.trim()).filter(Boolean);
+  const directions = document.querySelector('#recipe-directions').value.trim();
+  if (!name || !ingredients.length) return;
+  state.customRecipes.unshift({ id: `custom-${Date.now()}`, name, ingredients, directions, custom: true });
+  saveLocal('pantrypal-recipes', state.customRecipes);
+  elements.recipeDialog.close();
+  renderRecipes();
+  showMessage('Recipe added.', 'success');
+});
+
+elements.availableOnly.addEventListener('change', () => {
+  state.availableOnly = elements.availableOnly.checked;
+  renderRecipes();
+});
+
+elements.recipeList.addEventListener('click', (event) => {
+  const addButton = event.target.closest('[data-recipe-id]');
+  const deleteButton = event.target.closest('[data-delete-recipe]');
+  if (addButton) {
+    const entry = allRecipes().map(recipeDetails).find((candidate) => candidate.recipe.id === addButton.dataset.recipeId);
+    if (entry) {
+      addShoppingItems(entry.missing);
+      showMessage('Missing ingredients added to your shopping list.', 'success');
+    }
+  }
+  if (deleteButton) {
+    state.customRecipes = state.customRecipes.filter((recipe) => recipe.id !== deleteButton.dataset.deleteRecipe);
+    saveLocal('pantrypal-recipes', state.customRecipes);
+    renderRecipes();
+  }
+});
+
+document.querySelector('#shopping-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const input = document.querySelector('#shopping-input');
+  if (input.value.trim()) addShoppingItems([input.value.trim()]);
+  input.value = '';
+});
+
+elements.shoppingList.addEventListener('change', (event) => {
+  const toggle = event.target.closest('[data-shopping-toggle]');
+  if (!toggle) return;
+  const item = state.shopping.find((entry) => entry.id === toggle.dataset.shoppingToggle);
+  if (item) item.done = toggle.checked;
+  saveLocal('pantrypal-shopping', state.shopping);
+  renderShopping();
+});
+
+elements.shoppingList.addEventListener('click', (event) => {
+  const remove = event.target.closest('[data-shopping-delete]');
+  if (!remove) return;
+  state.shopping = state.shopping.filter((item) => item.id !== remove.dataset.shoppingDelete);
+  saveLocal('pantrypal-shopping', state.shopping);
+  renderShopping();
+});
+
+document.querySelector('#clear-shopping').addEventListener('click', () => {
+  state.shopping = state.shopping.filter((item) => !item.done);
+  saveLocal('pantrypal-shopping', state.shopping);
+  renderShopping();
 });
 
 loadItems();

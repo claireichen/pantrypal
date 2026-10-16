@@ -77,6 +77,48 @@
           <button class="text-button" id="empty-add" type="button">Add an item</button>
         </div>
       </section>
+
+      <section class="meal-planner" aria-labelledby="meal-planner-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">SMART MEAL PLANNING</p>
+            <h2 id="meal-planner-title">Cook with what you have</h2>
+            <p>Recommendations consider ingredient availability and give extra priority to food that expires soon.</p>
+          </div>
+          <button class="secondary-button" id="open-recipe-form" type="button">＋ Add your recipe</button>
+        </div>
+
+        <div class="planner-grid">
+          <div>
+            <div class="recipe-toolbar">
+              <p id="recipe-summary">Add ingredients to see your best matches.</p>
+              <label class="toggle-field">
+                <input id="available-only" type="checkbox">
+                <span>Only show recipes I can make</span>
+              </label>
+            </div>
+            <div id="recipe-list" class="recipe-list" aria-live="polite"></div>
+          </div>
+
+          <aside class="shopping-panel" aria-labelledby="shopping-title">
+            <div class="shopping-heading">
+              <div>
+                <p class="eyebrow">SHOPPING LIST</p>
+                <h3 id="shopping-title">Missing ingredients</h3>
+              </div>
+              <span id="shopping-count" class="count-badge">0</span>
+            </div>
+            <form id="shopping-form" class="quick-add">
+              <label class="sr-only" for="shopping-input">Add a shopping list item</label>
+              <input id="shopping-input" maxlength="80" placeholder="Add an item">
+              <button type="submit" aria-label="Add to shopping list">＋</button>
+            </form>
+            <div id="shopping-list" class="shopping-list"></div>
+            <p id="shopping-empty" class="shopping-empty">Choose a recipe to add its missing ingredients.</p>
+            <button id="clear-shopping" class="text-button small-text-button" type="button">Clear completed</button>
+          </aside>
+        </div>
+      </section>
     </main>
 
     <dialog id="item-dialog">
@@ -157,6 +199,34 @@
         <div class="form-actions">
           <button class="secondary-button" value="cancel">Keep item</button>
           <button class="danger-button" id="confirm-delete" value="confirm">Delete</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="recipe-dialog">
+      <form id="recipe-form" method="dialog" novalidate>
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">YOUR RECIPE</p>
+            <h2>Add a favorite meal</h2>
+          </div>
+          <button class="icon-button" id="close-recipe-form" type="button" aria-label="Close">×</button>
+        </div>
+        <label class="field field-wide">
+          <span>Recipe name</span>
+          <input id="recipe-name" maxlength="80" placeholder="e.g. Sunday vegetable soup" required>
+        </label>
+        <label class="field field-wide">
+          <span>Ingredients <small>separate with commas</small></span>
+          <textarea id="recipe-ingredients" maxlength="500" rows="4" placeholder="carrot, onion, broth, spinach" required></textarea>
+        </label>
+        <label class="field field-wide">
+          <span>Directions <small>optional</small></span>
+          <textarea id="recipe-directions" maxlength="800" rows="4" placeholder="Brief preparation notes…"></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="secondary-button" id="cancel-recipe-form" type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save recipe</button>
         </div>
       </form>
     </dialog>
