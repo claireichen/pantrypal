@@ -10,15 +10,6 @@ const state = {
   recipeFetchToken: 0
 };
 
-const builtInRecipes = [
-  { id: 'vegetable-fried-rice', name: 'Use-It-Up Vegetable Fried Rice', ingredients: ['rice', 'egg', 'carrot', 'peas', 'onion'], directions: 'Sauté the vegetables, add cooked rice, then stir in the egg and season.' },
-  { id: 'spinach-pasta', name: 'Creamy Spinach Pasta', ingredients: ['pasta', 'spinach', 'garlic', 'milk', 'cheese'], directions: 'Cook pasta, wilt spinach and garlic, then combine with milk and cheese.' },
-  { id: 'pantry-chili', name: 'Easy Pantry Chili', ingredients: ['beans', 'tomato', 'onion', 'corn', 'chili powder'], directions: 'Simmer everything together until thick and flavorful.' },
-  { id: 'freezer-smoothie', name: 'Freezer Fruit Smoothie', ingredients: ['frozen fruit', 'banana', 'milk', 'yogurt'], directions: 'Blend all ingredients until smooth.' },
-  { id: 'vegetable-soup', name: 'Clean-Out-the-Fridge Soup', ingredients: ['carrot', 'onion', 'celery', 'broth', 'potato'], directions: 'Chop, combine, and simmer until the vegetables are tender.' },
-  { id: 'quesadilla', name: 'Quick Bean Quesadillas', ingredients: ['tortilla', 'beans', 'cheese', 'salsa'], directions: 'Fill tortillas, toast on both sides, and serve with salsa.' }
-];
-
 const elements = {
   list: document.querySelector('#item-list'),
   empty: document.querySelector('#empty-state'),
@@ -174,7 +165,7 @@ function render() {
 }
 
 function allRecipes() {
-  const recipes = [...state.customRecipes, ...state.apiRecipes, ...builtInRecipes];
+  const recipes = [...state.customRecipes, ...state.apiRecipes];
   const seen = new Set();
   return recipes.filter((recipe) => {
     const key = normalized(recipe.name);
@@ -242,7 +233,11 @@ function renderRecipes() {
         </div>
         </div>
       </article>`;
-  }).join('') : '<div class="recipe-empty">No recipes match this filter yet.</div>';
+  }).join('') : `<div class="recipe-empty">${state.recipeApiStatus === 'offline'
+    ? 'Live recipes are temporarily unavailable. Please try refreshing in a moment.'
+    : state.availableOnly
+      ? 'No live recipes use every ingredient you have. Turn off the filter to see the closest matches.'
+      : 'No live recipes found for the current inventory yet.'}</div>`;
 
   renderShopping();
 }
