@@ -13,6 +13,7 @@ PantryPal is a responsive household food inventory for refrigerator, freezer, an
 - Prioritize recipes that use ingredients nearing expiration
 - Add missing ingredients to a persistent shopping list
 - Save personal recipes in the browser
+- Pull live recipes, images, and instructions from TheMealDB and retain built-in fallbacks
 - Persist data in SQLite locally or Supabase PostgreSQL in production
 - Run automated validation and database tests in GitHub Actions
 
@@ -42,6 +43,8 @@ SQLite is ideal for local development, but Vercel functions do not provide persi
 4. Add these environment variables in the Vercel project settings:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
+
+PantryPal uses TheMealDB's development key by default for this educational project. Set `THEMEALDB_API_KEY` to a supporter key for longer-term production use. Live recipe cards link to their original source and identify TheMealDB as the provider.
 5. Deploy the project.
 
 Keep the service role key private. The browser never receives it; only the server API reads it.

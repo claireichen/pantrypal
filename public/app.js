@@ -4,7 +4,10 @@ const state = {
   items: [], location: 'all', search: '', deleteId: null,
   availableOnly: false,
   customRecipes: readLocal('pantrypal-recipes', []),
-  shopping: readLocal('pantrypal-shopping', [])
+  shopping: readLocal('pantrypal-shopping', []),
+  apiRecipes: [],
+  recipeApiStatus: 'idle',
+  recipeFetchToken: 0
 };
 
 const builtInRecipes = [
@@ -39,6 +42,7 @@ const elements = {
   recipeForm: document.querySelector('#recipe-form'),
   recipeList: document.querySelector('#recipe-list'),
   recipeSummary: document.querySelector('#recipe-summary'),
+  recipeProvider: document.querySelector('#recipe-provider'),
   availableOnly: document.querySelector('#available-only'),
   shoppingList: document.querySelector('#shopping-list'),
   shoppingEmpty: document.querySelector('#shopping-empty'),
@@ -50,6 +54,8 @@ const locationDetails = {
   freezer: { label: 'Freezer', icon: '◆' },
   pantry: { label: 'Pantry', icon: '◫' }
 };
+
+const commonStaples = ['water', 'salt', 'pepper', 'oil', 'sugar'];
 
 function escapeHtml(value) {
   const node = document.createElement('div');
@@ -78,6 +84,26 @@ function ingredientMatches(itemName, ingredient) {
   const item = normalized(itemName);
   const needed = normalized(ingredient);
   return item === needed || item.includes(needed) || needed.includes(item);
+}
+
+function isCommonStaple(ingredient) {
+  const value = normalized(ingredient);
+  return commonStaples.some((staple) => value === staple || value.endsWith(` ${staple}`));
+}
+
+function safeHref(value) {
+  if (!value) return '';
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? escapeHtml(url.toString()) : '';
+  } catch {
+    return '';
+  }
+}
+
+function directionsPreview(value) {
+  const compact = String(value || '').replace(/\s+/g, ' ').trim();
+  return compact.length > 260 ? `${compact.slice(0, 257)}…` : compact;
 }
 
 function formatQuantity(item) {
@@ -148,39 +174,56 @@ function render() {
 }
 
 function allRecipes() {
-  return [...state.customRecipes, ...builtInRecipes];
+  const recipes = [...state.customRecipes, ...state.apiRecipes, ...builtInRecipes];
+  const seen = new Set();
+  return recipes.filter((recipe) => {
+    const key = normalized(recipe.name);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function recipeDetails(recipe) {
-  const matches = recipe.ingredients.map((ingredient) => ({
+  const consideredIngredients = recipe.ingredients.filter((ingredient) => !isCommonStaple(ingredient));
+  const matches = consideredIngredients.map((ingredient) => ({
     ingredient,
     item: state.items.find((candidate) => ingredientMatches(candidate.name, ingredient))
   }));
   const available = matches.filter((match) => match.item);
   const missing = matches.filter((match) => !match.item).map((match) => match.ingredient);
   const urgent = available.filter((match) => ['soon', 'expired'].includes(dateStatus(match.item.expirationDate).className));
-  const percent = recipe.ingredients.length ? Math.round((available.length / recipe.ingredients.length) * 100) : 0;
+  const percent = consideredIngredients.length ? Math.round((available.length / consideredIngredients.length) * 100) : 0;
   return { recipe, available, missing, urgent, percent, score: percent + (urgent.length * 8) };
 }
 
 function renderRecipes() {
   const ranked = allRecipes().map(recipeDetails)
     .filter((entry) => !state.availableOnly || entry.missing.length === 0)
-    .sort((a, b) => b.score - a.score || a.missing.length - b.missing.length);
+    .sort((a, b) => b.score - a.score || a.missing.length - b.missing.length)
+    .slice(0, 12);
 
   const complete = ranked.filter((entry) => entry.missing.length === 0).length;
-  elements.recipeSummary.textContent = state.items.length
-    ? `${complete} recipe${complete === 1 ? '' : 's'} ready to make · ranked by availability and expiration urgency`
-    : 'Add ingredients to see your best matches.';
+  if (state.recipeApiStatus === 'loading') {
+    elements.recipeSummary.textContent = 'Finding live recipes using your inventory…';
+  } else {
+    elements.recipeSummary.textContent = state.items.length
+      ? `${complete} recipe${complete === 1 ? '' : 's'} ready to make · ranked by availability and expiration urgency`
+      : 'Add ingredients to see your best matches.';
+  }
+  elements.recipeProvider.hidden = state.recipeApiStatus !== 'ready';
 
   elements.recipeList.innerHTML = ranked.length ? ranked.map((entry, index) => {
     const { recipe, missing, urgent, percent } = entry;
     const ready = missing.length === 0;
     return `
-      <article class="recipe-card ${index === 0 && state.items.length ? 'best-match' : ''}">
+      <article class="recipe-card ${index === 0 && state.items.length ? 'best-match' : ''} ${recipe.image ? 'has-image' : ''}">
+        ${recipe.image ? `<img class="recipe-image" src="${safeHref(recipe.image)}" alt="${escapeHtml(recipe.name)}" loading="lazy">` : ''}
+        <div class="recipe-card-body">
         <div class="recipe-card-top">
           <div>
             ${index === 0 && state.items.length ? '<span class="match-label">Best match</span>' : ''}
+            ${recipe.provider ? `<span class="provider-label">${escapeHtml(recipe.provider)}${recipe.area ? ` · ${escapeHtml(recipe.area)}` : ''}</span>` : ''}
             <h3>${escapeHtml(recipe.name)}</h3>
           </div>
           <strong class="match-percent">${percent}%</strong>
@@ -189,10 +232,14 @@ function renderRecipes() {
         <p class="ingredient-line"><strong>Needs:</strong> ${recipe.ingredients.map(escapeHtml).join(', ')}</p>
         ${urgent.length ? `<p class="urgent-note">Use soon: ${urgent.map((match) => escapeHtml(match.item.name)).join(', ')}</p>` : ''}
         <p class="recipe-status ${ready ? 'ready' : ''}">${ready ? 'You have everything' : `Missing ${missing.length}: ${missing.map(escapeHtml).join(', ')}`}</p>
-        <p class="directions">${escapeHtml(recipe.directions || 'Use your preferred preparation method.')}</p>
+        <p class="directions">${escapeHtml(directionsPreview(recipe.directions) || 'Use your preferred preparation method.')}</p>
         <div class="recipe-actions">
           ${missing.length ? `<button class="secondary-button add-missing" data-recipe-id="${escapeHtml(recipe.id)}" type="button">Add missing to list</button>` : '<span class="ready-mark">✓ Ready to cook</span>'}
-          ${recipe.custom ? `<button class="text-button delete-recipe" data-delete-recipe="${escapeHtml(recipe.id)}" type="button">Delete recipe</button>` : ''}
+          <span class="recipe-links">
+            ${recipe.sourceUrl ? `<a href="${safeHref(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">View full recipe ↗</a>` : ''}
+            ${recipe.custom ? `<button class="text-button delete-recipe" data-delete-recipe="${escapeHtml(recipe.id)}" type="button">Delete recipe</button>` : ''}
+          </span>
+        </div>
         </div>
       </article>`;
   }).join('') : '<div class="recipe-empty">No recipes match this filter yet.</div>';
@@ -245,9 +292,40 @@ async function loadItems() {
     const payload = await request('/api/items');
     state.items = payload.items;
     render();
+    await loadExternalRecipes();
   } catch (error) {
     showMessage('Could not load the inventory. Try refreshing the page.');
   }
+}
+
+async function loadExternalRecipes() {
+  const token = ++state.recipeFetchToken;
+  if (!state.items.length) {
+    state.apiRecipes = [];
+    state.recipeApiStatus = 'idle';
+    renderRecipes();
+    return;
+  }
+
+  const prioritized = [...state.items].sort((a, b) => {
+    const urgentA = ['soon', 'expired'].includes(dateStatus(a.expirationDate).className) ? 1 : 0;
+    const urgentB = ['soon', 'expired'].includes(dateStatus(b.expirationDate).className) ? 1 : 0;
+    return urgentB - urgentA;
+  });
+  const ingredientNames = prioritized.slice(0, 12).map((item) => item.name);
+  state.recipeApiStatus = 'loading';
+  renderRecipes();
+  try {
+    const payload = await request(`/api/recipes?ingredients=${encodeURIComponent(ingredientNames.join(','))}`);
+    if (token !== state.recipeFetchToken) return;
+    state.apiRecipes = Array.isArray(payload.recipes) ? payload.recipes : [];
+    state.recipeApiStatus = state.apiRecipes.length ? 'ready' : 'empty';
+  } catch {
+    if (token !== state.recipeFetchToken) return;
+    state.apiRecipes = [];
+    state.recipeApiStatus = 'offline';
+  }
+  renderRecipes();
 }
 
 function clearErrors() {

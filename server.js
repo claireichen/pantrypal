@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const itemsHandler = require('./api/items');
 const healthHandler = require('./api/health');
+const recipesHandler = require('./api/recipes');
 
 const port = Number(process.env.PORT) || 3000;
 const publicDirectory = path.join(__dirname, 'public');
@@ -47,6 +48,7 @@ const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
   if (pathname === '/api/items') return itemsHandler(req, res);
   if (pathname === '/api/health') return healthHandler(req, res);
+  if (pathname === '/api/recipes') return recipesHandler(req, res);
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { Allow: 'GET, HEAD' }).end('Method not allowed');
     return;
