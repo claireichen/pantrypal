@@ -2,7 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateItem, parseId } = require('../src/validation');
+const {
+  validateItem,
+  parseId,
+  validateCustomRecipe,
+  validateShoppingItem,
+  validateNotificationSettings
+} = require('../src/validation');
 
 test('accepts a valid refrigerator item', () => {
   const result = validateItem({
@@ -33,4 +39,23 @@ test('parses positive integer IDs only', () => {
   assert.equal(parseId('0'), null);
   assert.equal(parseId('3.5'), null);
   assert.equal(parseId('abc'), null);
+});
+
+test('validates cloud-saved recipes and shopping items', () => {
+  const recipe = validateCustomRecipe({ name: 'Soup', ingredients: ['carrot', 'onion'], directions: 'Simmer.' });
+  assert.equal(recipe.valid, true);
+  assert.equal(recipe.recipe.custom, true);
+  assert.equal(validateCustomRecipe({ name: '', ingredients: [] }).valid, false);
+
+  const shopping = validateShoppingItem({ name: 'Milk', done: true });
+  assert.equal(shopping.valid, true);
+  assert.equal(shopping.item.done, true);
+  assert.equal(validateShoppingItem({ name: '' }).valid, false);
+});
+
+test('normalizes notification settings', () => {
+  assert.deepEqual(validateNotificationSettings({ days: 7, inApp: false, browser: true }), {
+    days: 7, inApp: false, browser: true
+  });
+  assert.equal(validateNotificationSettings({ days: 20 }).days, 3);
 });

@@ -12,5 +12,32 @@ create table if not exists public.items (
 
 alter table public.items enable row level security;
 
+create table if not exists public.custom_recipes (
+  id text primary key,
+  name text not null check (char_length(name) between 1 and 80),
+  ingredients jsonb not null default '[]'::jsonb,
+  directions text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.shopping_items (
+  id text primary key,
+  name text not null check (char_length(name) between 1 and 80),
+  done boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.app_settings (
+  id smallint primary key default 1 check (id = 1),
+  notification_days smallint not null default 3 check (notification_days in (1, 3, 5, 7)),
+  in_app_notifications boolean not null default true,
+  browser_notifications boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.custom_recipes enable row level security;
+alter table public.shopping_items enable row level security;
+alter table public.app_settings enable row level security;
+
 -- The app uses the Supabase service role key only inside the server API.
 -- No public browser access to this table is granted.

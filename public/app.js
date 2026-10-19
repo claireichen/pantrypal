@@ -98,10 +98,6 @@ function readObjectLocal(key, fallback) {
   }
 }
 
-function saveLocal(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
 function normalized(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 }
@@ -434,14 +430,21 @@ function closeRecipeDetail() {
   state.selectedRecipeId = null;
 }
 
-function addShoppingItems(names) {
+async function addShoppingItems(names) {
+  const created = [];
   for (const name of names) {
     if (!state.shopping.some((item) => normalized(item.name) === normalized(name))) {
-      state.shopping.push({ id: `${Date.now()}-${Math.random()}`, name, done: false });
+      const payload = await request('/api/user-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'shopping', item: { name, done: false } })
+      });
+      state.shopping.push(payload.item);
+      created.push(payload.item);
     }
   }
-  saveLocal('pantrypal-shopping', state.shopping);
   renderShopping();
+  return created;
 }
 
 function renderShopping() {
@@ -486,6 +489,38 @@ async function loadItems() {
     await loadExternalRecipes();
   } catch (error) {
     showMessage('Could not load the inventory. Try refreshing the page.');
+  }
+}
+
+async function loadUserData() {
+  const localSnapshot = {
+    customRecipes: readLocal('pantrypal-recipes', []),
+    shopping: readLocal('pantrypal-shopping', []),
+    notificationSettings: readObjectLocal('pantrypal-notifications', { days: 3, inApp: true, browser: false })
+  };
+  try {
+    let payload = await request('/api/user-data');
+    const hasLocalData = localSnapshot.customRecipes.length > 0
+      || localSnapshot.shopping.length > 0
+      || localStorage.getItem('pantrypal-notifications') !== null;
+    if (hasLocalData && localStorage.getItem('pantrypal-cloud-migrated') !== 'true') {
+      payload = await request('/api/user-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'migration', ...localSnapshot })
+      });
+    }
+    state.customRecipes = Array.isArray(payload.customRecipes) ? payload.customRecipes : [];
+    state.shopping = Array.isArray(payload.shopping) ? payload.shopping : [];
+    state.notificationSettings = payload.notificationSettings || { days: 3, inApp: true, browser: false };
+    localStorage.removeItem('pantrypal-recipes');
+    localStorage.removeItem('pantrypal-shopping');
+    localStorage.removeItem('pantrypal-notifications');
+    localStorage.setItem('pantrypal-cloud-migrated', 'true');
+    renderShopping();
+    renderExpirationAlert();
+  } catch {
+    showMessage('Cloud-saved recipes, shopping items, and settings are temporarily unavailable.');
   }
 }
 
@@ -573,7 +608,7 @@ elements.form.addEventListener('submit', async (event) => {
     });
     if (shoppingTransferId) {
       state.shopping = state.shopping.filter((item) => item.id !== shoppingTransferId);
-      saveLocal('pantrypal-shopping', state.shopping);
+      await request(`/api/user-data?type=shopping&id=${encodeURIComponent(shoppingTransferId)}`, { method: 'DELETE' });
     }
     closeForm();
     await loadItems();
@@ -642,17 +677,25 @@ document.querySelector('#open-recipe-form').addEventListener('click', () => {
 document.querySelector('#close-recipe-form').addEventListener('click', () => elements.recipeDialog.close());
 document.querySelector('#cancel-recipe-form').addEventListener('click', () => elements.recipeDialog.close());
 
-elements.recipeForm.addEventListener('submit', (event) => {
+elements.recipeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const name = document.querySelector('#recipe-name').value.trim();
   const ingredients = document.querySelector('#recipe-ingredients').value.split(',').map((value) => value.trim()).filter(Boolean);
   const directions = document.querySelector('#recipe-directions').value.trim();
   if (!name || !ingredients.length) return;
-  state.customRecipes.unshift({ id: `custom-${Date.now()}`, name, ingredients, directions, custom: true });
-  saveLocal('pantrypal-recipes', state.customRecipes);
-  elements.recipeDialog.close();
-  renderRecipes();
-  showMessage('Recipe added.', 'success');
+  try {
+    const payload = await request('/api/user-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'recipe', recipe: { name, ingredients, directions } })
+    });
+    state.customRecipes.unshift(payload.recipe);
+    elements.recipeDialog.close();
+    renderRecipes();
+    showMessage('Recipe saved to your cloud database.', 'success');
+  } catch (error) {
+    showMessage(error.message);
+  }
 });
 
 elements.availableOnly.addEventListener('change', () => {
@@ -670,14 +713,18 @@ elements.recipeList.addEventListener('click', (event) => {
   if (addButton) {
     const entry = allRecipes().map(recipeDetails).find((candidate) => candidate.recipe.id === addButton.dataset.recipeId);
     if (entry) {
-      addShoppingItems(entry.missing);
-      showMessage('Missing ingredients added to your shopping list.', 'success');
+      addShoppingItems(entry.missing)
+        .then(() => showMessage('Missing ingredients saved to your shopping list.', 'success'))
+        .catch((error) => showMessage(error.message));
     }
   }
   if (deleteButton) {
-    state.customRecipes = state.customRecipes.filter((recipe) => recipe.id !== deleteButton.dataset.deleteRecipe);
-    saveLocal('pantrypal-recipes', state.customRecipes);
-    renderRecipes();
+    request(`/api/user-data?type=recipe&id=${encodeURIComponent(deleteButton.dataset.deleteRecipe)}`, { method: 'DELETE' })
+      .then(() => {
+        state.customRecipes = state.customRecipes.filter((recipe) => recipe.id !== deleteButton.dataset.deleteRecipe);
+        renderRecipes();
+      })
+      .catch((error) => showMessage(error.message));
   }
 });
 
@@ -712,20 +759,36 @@ elements.recipeDetailForm.addEventListener('submit', async (event) => {
   }
 });
 
-document.querySelector('#shopping-form').addEventListener('submit', (event) => {
+document.querySelector('#shopping-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const input = document.querySelector('#shopping-input');
-  if (input.value.trim()) addShoppingItems([input.value.trim()]);
+  try {
+    if (input.value.trim()) await addShoppingItems([input.value.trim()]);
+  } catch (error) {
+    showMessage(error.message);
+  }
   input.value = '';
 });
 
-elements.shoppingList.addEventListener('change', (event) => {
+elements.shoppingList.addEventListener('change', async (event) => {
   const toggle = event.target.closest('[data-shopping-toggle]');
   if (!toggle) return;
   const item = state.shopping.find((entry) => entry.id === toggle.dataset.shoppingToggle);
-  if (item) item.done = toggle.checked;
-  saveLocal('pantrypal-shopping', state.shopping);
+  if (!item) return;
+  const previous = item.done;
+  item.done = toggle.checked;
   renderShopping();
+  try {
+    await request('/api/user-data', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'shopping', id: item.id, done: item.done })
+    });
+  } catch (error) {
+    item.done = previous;
+    renderShopping();
+    showMessage(error.message);
+  }
 });
 
 elements.shoppingList.addEventListener('click', (event) => {
@@ -737,16 +800,23 @@ elements.shoppingList.addEventListener('click', (event) => {
     return;
   }
   if (remove) {
-    state.shopping = state.shopping.filter((item) => item.id !== remove.dataset.shoppingDelete);
-    saveLocal('pantrypal-shopping', state.shopping);
-    renderShopping();
+    request(`/api/user-data?type=shopping&id=${encodeURIComponent(remove.dataset.shoppingDelete)}`, { method: 'DELETE' })
+      .then(() => {
+        state.shopping = state.shopping.filter((item) => item.id !== remove.dataset.shoppingDelete);
+        renderShopping();
+      })
+      .catch((error) => showMessage(error.message));
   }
 });
 
-document.querySelector('#clear-shopping').addEventListener('click', () => {
-  state.shopping = state.shopping.filter((item) => !item.done);
-  saveLocal('pantrypal-shopping', state.shopping);
-  renderShopping();
+document.querySelector('#clear-shopping').addEventListener('click', async () => {
+  try {
+    await request('/api/user-data?type=completed-shopping', { method: 'DELETE' });
+    state.shopping = state.shopping.filter((item) => !item.done);
+    renderShopping();
+  } catch (error) {
+    showMessage(error.message);
+  }
 });
 
 document.querySelector('#open-notification-settings').addEventListener('click', openNotificationSettings);
@@ -765,18 +835,32 @@ elements.enableBrowserNotifications.addEventListener('click', async () => {
   if (permission === 'granted') elements.browserNotifications.checked = true;
 });
 
-elements.notificationForm.addEventListener('submit', (event) => {
+elements.notificationForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   state.notificationSettings = {
     days: Number(elements.notificationDays.value),
     inApp: elements.inAppNotifications.checked,
     browser: elements.browserNotifications.checked && 'Notification' in window && Notification.permission === 'granted'
   };
-  saveLocal('pantrypal-notifications', state.notificationSettings);
-  elements.notificationDialog.close();
-  renderExpirationAlert();
-  maybeSendExpirationNotification();
-  showMessage('Expiration reminder settings saved.', 'success');
+  try {
+    const payload = await request('/api/user-data', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'settings', settings: state.notificationSettings })
+    });
+    state.notificationSettings = payload.settings;
+    elements.notificationDialog.close();
+    renderExpirationAlert();
+    maybeSendExpirationNotification();
+    showMessage('Expiration reminder settings saved to the cloud.', 'success');
+  } catch (error) {
+    showMessage(error.message);
+  }
 });
 
-loadItems();
+async function initialize() {
+  await loadUserData();
+  await loadItems();
+}
+
+initialize();

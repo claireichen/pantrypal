@@ -37,4 +37,52 @@ function parseId(value) {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-module.exports = { LOCATIONS, UNITS, validateItem, parseId };
+function cleanIdentifier(value) {
+  if (typeof value !== 'string') return '';
+  const identifier = value.trim();
+  return /^[a-zA-Z0-9._-]{1,100}$/.test(identifier) ? identifier : '';
+}
+
+function validateCustomRecipe(input = {}) {
+  const ingredients = Array.isArray(input.ingredients)
+    ? input.ingredients.map((value) => cleanText(value, 100)).filter(Boolean).slice(0, 40)
+    : [];
+  const recipe = {
+    id: cleanIdentifier(input.id) || `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: cleanText(input.name, 80),
+    ingredients,
+    directions: cleanText(input.directions, 800),
+    custom: true
+  };
+  const errors = {};
+  if (!recipe.name) errors.name = 'Enter a recipe name.';
+  if (!recipe.ingredients.length) errors.ingredients = 'Add at least one ingredient.';
+  return { recipe, errors, valid: Object.keys(errors).length === 0 };
+}
+
+function validateShoppingItem(input = {}) {
+  const item = {
+    id: cleanIdentifier(input.id) || `shopping-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: cleanText(input.name, 80),
+    done: input.done === true
+  };
+  return { item, valid: Boolean(item.name), errors: item.name ? {} : { name: 'Enter a shopping item.' } };
+}
+
+function validateNotificationSettings(input = {}) {
+  return {
+    days: [1, 3, 5, 7].includes(Number(input.days)) ? Number(input.days) : 3,
+    inApp: input.inApp !== false,
+    browser: input.browser === true
+  };
+}
+
+module.exports = {
+  LOCATIONS,
+  UNITS,
+  validateItem,
+  parseId,
+  validateCustomRecipe,
+  validateShoppingItem,
+  validateNotificationSettings
+};

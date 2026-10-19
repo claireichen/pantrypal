@@ -18,6 +18,22 @@ function mapRow(row) {
   };
 }
 
+function mapRecipeRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    ingredients: typeof row.ingredients === 'string' ? JSON.parse(row.ingredients) : row.ingredients,
+    directions: row.directions || '',
+    custom: true
+  };
+}
+
+function mapShoppingRow(row) {
+  return { id: row.id, name: row.name, done: row.done === true || row.done === 1 };
+}
+
+const defaultNotificationSettings = { days: 3, inApp: true, browser: false };
+
 function createSqliteStore(databasePath) {
   const resolved = path.resolve(databasePath);
   fs.mkdirSync(path.dirname(resolved), { recursive: true });
@@ -33,6 +49,26 @@ function createSqliteStore(databasePath) {
       expiration_date TEXT,
       notes TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS custom_recipes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      ingredients TEXT NOT NULL,
+      directions TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS shopping_items (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      notification_days INTEGER NOT NULL DEFAULT 3,
+      in_app_notifications INTEGER NOT NULL DEFAULT 1,
+      browser_notifications INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -52,6 +88,39 @@ function createSqliteStore(databasePath) {
     WHERE id = ?
   `);
   const deleteStatement = db.prepare('DELETE FROM items WHERE id = ?');
+  const listRecipesStatement = db.prepare('SELECT * FROM custom_recipes ORDER BY created_at DESC');
+  const createRecipeStatement = db.prepare(`
+    INSERT INTO custom_recipes (id, name, ingredients, directions) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, ingredients = excluded.ingredients, directions = excluded.directions
+  `);
+  const deleteRecipeStatement = db.prepare('DELETE FROM custom_recipes WHERE id = ?');
+  const listShoppingStatement = db.prepare('SELECT * FROM shopping_items ORDER BY created_at ASC');
+  const createShoppingStatement = db.prepare(`
+    INSERT INTO shopping_items (id, name, done) VALUES (?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, done = excluded.done
+  `);
+  const updateShoppingStatement = db.prepare('UPDATE shopping_items SET done = ? WHERE id = ?');
+  const deleteShoppingStatement = db.prepare('DELETE FROM shopping_items WHERE id = ?');
+  const clearShoppingStatement = db.prepare('DELETE FROM shopping_items WHERE done = 1');
+  const getSettingsStatement = db.prepare('SELECT * FROM app_settings WHERE id = 1');
+  const updateSettingsStatement = db.prepare(`
+    INSERT INTO app_settings (id, notification_days, in_app_notifications, browser_notifications, updated_at)
+    VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      notification_days = excluded.notification_days,
+      in_app_notifications = excluded.in_app_notifications,
+      browser_notifications = excluded.browser_notifications,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+
+  function getSettings() {
+    const row = getSettingsStatement.get();
+    return row ? {
+      days: Number(row.notification_days),
+      inApp: Boolean(row.in_app_notifications),
+      browser: Boolean(row.browser_notifications)
+    } : { ...defaultNotificationSettings };
+  }
 
   return {
     async list() {
@@ -72,6 +141,37 @@ function createSqliteStore(databasePath) {
     async remove(id) {
       return deleteStatement.run(id).changes > 0;
     },
+    async getUserData() {
+      return {
+        customRecipes: listRecipesStatement.all().map(mapRecipeRow),
+        shopping: listShoppingStatement.all().map(mapShoppingRow),
+        notificationSettings: getSettings()
+      };
+    },
+    async createRecipe(recipe) {
+      createRecipeStatement.run(recipe.id, recipe.name, JSON.stringify(recipe.ingredients), recipe.directions);
+      return recipe;
+    },
+    async removeRecipe(id) {
+      return deleteRecipeStatement.run(id).changes > 0;
+    },
+    async createShoppingItem(item) {
+      createShoppingStatement.run(item.id, item.name, item.done ? 1 : 0);
+      return item;
+    },
+    async updateShoppingItem(id, done) {
+      return updateShoppingStatement.run(done ? 1 : 0, id).changes > 0;
+    },
+    async removeShoppingItem(id) {
+      return deleteShoppingStatement.run(id).changes > 0;
+    },
+    async clearCompletedShopping() {
+      return clearShoppingStatement.run().changes;
+    },
+    async updateNotificationSettings(settings) {
+      updateSettingsStatement.run(settings.days, settings.inApp ? 1 : 0, settings.browser ? 1 : 0);
+      return settings;
+    },
     close() {
       db.close();
     }
@@ -79,15 +179,15 @@ function createSqliteStore(databasePath) {
 }
 
 function createSupabaseStore(url, serviceRoleKey) {
-  const endpoint = `${url.replace(/\/$/, '')}/rest/v1/items`;
+  const endpoint = `${url.replace(/\/$/, '')}/rest/v1`;
   const headers = {
     apikey: serviceRoleKey,
     Authorization: `Bearer ${serviceRoleKey}`,
     'Content-Type': 'application/json'
   };
 
-  async function request(query, options = {}) {
-    const response = await fetch(`${endpoint}${query}`, {
+  async function request(table, query = '', options = {}) {
+    const response = await fetch(`${endpoint}/${table}${query}`, {
       ...options,
       headers: { ...headers, ...options.headers }
     });
@@ -111,11 +211,11 @@ function createSupabaseStore(url, serviceRoleKey) {
 
   return {
     async list() {
-      const rows = await request('?select=*&order=expiration_date.asc.nullslast,created_at.desc');
+      const rows = await request('items', '?select=*&order=expiration_date.asc.nullslast,created_at.desc');
       return rows.map(mapRow);
     },
     async create(item) {
-      const rows = await request('', {
+      const rows = await request('items', '', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify(toDatabase(item))
@@ -123,7 +223,7 @@ function createSupabaseStore(url, serviceRoleKey) {
       return mapRow(rows[0]);
     },
     async update(id, item) {
-      const rows = await request(`?id=eq.${id}`, {
+      const rows = await request('items', `?id=eq.${id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify(toDatabase(item))
@@ -131,11 +231,83 @@ function createSupabaseStore(url, serviceRoleKey) {
       return rows.length ? mapRow(rows[0]) : null;
     },
     async remove(id) {
-      const rows = await request(`?id=eq.${id}`, {
+      const rows = await request('items', `?id=eq.${id}`, {
         method: 'DELETE',
         headers: { Prefer: 'return=representation' }
       });
       return Array.isArray(rows) && rows.length > 0;
+    },
+    async getUserData() {
+      const [recipes, shopping, settingsRows] = await Promise.all([
+        request('custom_recipes', '?select=*&order=created_at.desc'),
+        request('shopping_items', '?select=*&order=created_at.asc'),
+        request('app_settings', '?select=*&id=eq.1')
+      ]);
+      const settings = settingsRows[0];
+      return {
+        customRecipes: recipes.map(mapRecipeRow),
+        shopping: shopping.map(mapShoppingRow),
+        notificationSettings: settings ? {
+          days: Number(settings.notification_days),
+          inApp: settings.in_app_notifications,
+          browser: settings.browser_notifications
+        } : { ...defaultNotificationSettings }
+      };
+    },
+    async createRecipe(recipe) {
+      const rows = await request('custom_recipes', '', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({ id: recipe.id, name: recipe.name, ingredients: recipe.ingredients, directions: recipe.directions })
+      });
+      return mapRecipeRow(rows[0]);
+    },
+    async removeRecipe(id) {
+      const rows = await request('custom_recipes', `?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE', headers: { Prefer: 'return=representation' }
+      });
+      return rows.length > 0;
+    },
+    async createShoppingItem(item) {
+      const rows = await request('shopping_items', '', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({ id: item.id, name: item.name, done: item.done })
+      });
+      return mapShoppingRow(rows[0]);
+    },
+    async updateShoppingItem(id, done) {
+      const rows = await request('shopping_items', `?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ done })
+      });
+      return rows.length > 0;
+    },
+    async removeShoppingItem(id) {
+      const rows = await request('shopping_items', `?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE', headers: { Prefer: 'return=representation' }
+      });
+      return rows.length > 0;
+    },
+    async clearCompletedShopping() {
+      const rows = await request('shopping_items', '?done=eq.true', {
+        method: 'DELETE', headers: { Prefer: 'return=representation' }
+      });
+      return rows.length;
+    },
+    async updateNotificationSettings(settings) {
+      const rows = await request('app_settings', '', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({
+          id: 1,
+          notification_days: settings.days,
+          in_app_notifications: settings.inApp,
+          browser_notifications: settings.browser,
+          updated_at: new Date().toISOString()
+        })
+      });
+      const row = rows[0];
+      return { days: Number(row.notification_days), inApp: row.in_app_notifications, browser: row.browser_notifications };
     }
   };
 }
