@@ -54,7 +54,7 @@ Keep the service role key private. The browser never receives it; only the serve
 
 ## API
 
-The frontend communicates with a backend endpoint at `/api/items`:
+The frontend communicates with server-side API endpoints:
 
 - `GET /api/items` lists items.
 - `POST /api/items` creates an item.
@@ -62,6 +62,8 @@ The frontend communicates with a backend endpoint at `/api/items`:
 - `DELETE /api/items?id=1` deletes an item.
 
 `GET /api/health` provides a simple deployment health check.
+
+`/api/user-data` stores custom recipes, shopping-list items, and notification preferences in the database. `/api/recipes` retrieves external meal suggestions, and `/api/consume` updates inventory after cooking.
 
 ## Project structure
 
