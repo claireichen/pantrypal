@@ -14,6 +14,8 @@ PantryPal is a responsive household food inventory for refrigerator, freezer, an
 - Add missing ingredients to a persistent shopping list
 - Save personal recipes in the browser
 - Pull live recipes, images, and instructions from TheMealDB
+- Open complete recipe details and deduct used quantities after cooking
+- Move purchased shopping-list ingredients directly into inventory
 - Persist data in SQLite locally or Supabase PostgreSQL in production
 - Run automated validation and database tests in GitHub Actions
 

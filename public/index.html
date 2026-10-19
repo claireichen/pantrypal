@@ -91,7 +91,7 @@
         <div class="planner-grid">
           <div>
             <div class="recipe-toolbar">
-              <p id="recipe-summary">Add ingredients to see your best matches.</p>
+              <p id="recipe-summary" role="status" aria-live="polite">Add ingredients to see your best matches.</p>
               <label class="toggle-field">
                 <input id="available-only" type="checkbox">
                 <span>Only show recipes I can make</span>
@@ -228,6 +228,46 @@
         <div class="form-actions">
           <button class="secondary-button" id="cancel-recipe-form" type="button">Cancel</button>
           <button class="primary-button" type="submit">Save recipe</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="recipe-detail-dialog" class="recipe-detail-dialog">
+      <form id="recipe-detail-form" method="dialog">
+        <div class="detail-hero">
+          <img id="detail-image" alt="" hidden>
+          <div class="detail-heading">
+            <div>
+              <p class="eyebrow" id="detail-provider">RECIPE DETAILS</p>
+              <h2 id="detail-title">Recipe</h2>
+              <p id="detail-meta" class="detail-meta"></p>
+            </div>
+            <button class="icon-button" id="close-recipe-detail" type="button" aria-label="Close recipe details">×</button>
+          </div>
+        </div>
+
+        <div class="detail-content">
+          <section aria-labelledby="detail-ingredients-title">
+            <h3 id="detail-ingredients-title">Ingredients</h3>
+            <ul id="detail-ingredients" class="detail-ingredients"></ul>
+          </section>
+
+          <section aria-labelledby="detail-directions-title">
+            <h3 id="detail-directions-title">Directions</h3>
+            <p id="detail-directions" class="detail-directions"></p>
+          </section>
+
+          <section class="cook-section" aria-labelledby="cook-section-title">
+            <h3 id="cook-section-title">Update inventory after cooking</h3>
+            <p>Adjust how much of each matched item you plan to use. Items reduced to zero will be removed.</p>
+            <div id="consumption-list" class="consumption-list"></div>
+          </section>
+
+          <div class="form-actions detail-actions">
+            <a id="detail-source" class="text-link" target="_blank" rel="noopener noreferrer" hidden>Original recipe ↗</a>
+            <button class="secondary-button" id="cancel-recipe-detail" type="button">Close</button>
+            <button class="primary-button" id="cook-recipe" type="submit">Cook &amp; update inventory</button>
+          </div>
         </div>
       </form>
     </dialog>

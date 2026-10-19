@@ -7,7 +7,9 @@ const state = {
   shopping: readLocal('pantrypal-shopping', []),
   apiRecipes: [],
   recipeApiStatus: 'idle',
-  recipeFetchToken: 0
+  recipeFetchToken: 0,
+  selectedRecipeId: null,
+  shoppingTransferId: null
 };
 
 const elements = {
@@ -35,6 +37,17 @@ const elements = {
   recipeSummary: document.querySelector('#recipe-summary'),
   recipeProvider: document.querySelector('#recipe-provider'),
   availableOnly: document.querySelector('#available-only'),
+  recipeDetailDialog: document.querySelector('#recipe-detail-dialog'),
+  recipeDetailForm: document.querySelector('#recipe-detail-form'),
+  detailImage: document.querySelector('#detail-image'),
+  detailProvider: document.querySelector('#detail-provider'),
+  detailTitle: document.querySelector('#detail-title'),
+  detailMeta: document.querySelector('#detail-meta'),
+  detailIngredients: document.querySelector('#detail-ingredients'),
+  detailDirections: document.querySelector('#detail-directions'),
+  detailSource: document.querySelector('#detail-source'),
+  consumptionList: document.querySelector('#consumption-list'),
+  cookRecipe: document.querySelector('#cook-recipe'),
   shoppingList: document.querySelector('#shopping-list'),
   shoppingEmpty: document.querySelector('#shopping-empty'),
   shoppingCount: document.querySelector('#shopping-count')
@@ -82,14 +95,18 @@ function isCommonStaple(ingredient) {
   return commonStaples.some((staple) => value === staple || value.endsWith(` ${staple}`));
 }
 
-function safeHref(value) {
+function safeUrlValue(value) {
   if (!value) return '';
   try {
     const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) ? escapeHtml(url.toString()) : '';
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
   } catch {
     return '';
   }
+}
+
+function safeHref(value) {
+  return escapeHtml(safeUrlValue(value));
 }
 
 function directionsPreview(value) {
@@ -99,8 +116,9 @@ function directionsPreview(value) {
 
 function formatQuantity(item) {
   const quantity = Number.isInteger(item.quantity) ? item.quantity : Number(item.quantity.toFixed(2));
-  const plural = quantity !== 1 && ['item', 'can', 'bottle', 'box', 'bag'].includes(item.unit) ? 's' : '';
-  return `${quantity} ${item.unit}${plural}`;
+  const pluralUnits = { item: 'items', cup: 'cups', can: 'cans', bottle: 'bottles', box: 'boxes', bag: 'bags' };
+  const unit = quantity !== 1 ? (pluralUnits[item.unit] || item.unit) : item.unit;
+  return `${quantity} ${unit}`;
 }
 
 function dateStatus(dateValue) {
@@ -204,6 +222,15 @@ function renderRecipes() {
   }
   elements.recipeProvider.hidden = state.recipeApiStatus !== 'ready';
 
+  if (state.recipeApiStatus === 'loading' && !ranked.length) {
+    elements.recipeList.innerHTML = Array.from({ length: 3 }, () => `
+      <div class="recipe-skeleton" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>`).join('');
+    renderShopping();
+    return;
+  }
+
   elements.recipeList.innerHTML = ranked.length ? ranked.map((entry, index) => {
     const { recipe, missing, urgent, percent } = entry;
     const ready = missing.length === 0;
@@ -225,7 +252,10 @@ function renderRecipes() {
         <p class="recipe-status ${ready ? 'ready' : ''}">${ready ? 'You have everything' : `Missing ${missing.length}: ${missing.map(escapeHtml).join(', ')}`}</p>
         <p class="directions">${escapeHtml(directionsPreview(recipe.directions) || 'Use your preferred preparation method.')}</p>
         <div class="recipe-actions">
-          ${missing.length ? `<button class="secondary-button add-missing" data-recipe-id="${escapeHtml(recipe.id)}" type="button">Add missing to list</button>` : '<span class="ready-mark">✓ Ready to cook</span>'}
+          <span class="recipe-primary-actions">
+            <button class="primary-button view-recipe" data-view-recipe="${escapeHtml(recipe.id)}" type="button">View recipe</button>
+            ${missing.length ? `<button class="secondary-button add-missing" data-recipe-id="${escapeHtml(recipe.id)}" type="button">Add missing to list</button>` : '<span class="ready-mark">✓ Ready to cook</span>'}
+          </span>
           <span class="recipe-links">
             ${recipe.sourceUrl ? `<a href="${safeHref(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">View full recipe ↗</a>` : ''}
             ${recipe.custom ? `<button class="text-button delete-recipe" data-delete-recipe="${escapeHtml(recipe.id)}" type="button">Delete recipe</button>` : ''}
@@ -234,12 +264,73 @@ function renderRecipes() {
         </div>
       </article>`;
   }).join('') : `<div class="recipe-empty">${state.recipeApiStatus === 'offline'
-    ? 'Live recipes are temporarily unavailable. Please try refreshing in a moment.'
+    ? 'Live recipes are temporarily unavailable. <button class="text-button" data-retry-recipes type="button">Try again</button>'
     : state.availableOnly
       ? 'No live recipes use every ingredient you have. Turn off the filter to see the closest matches.'
       : 'No live recipes found for the current inventory yet.'}</div>`;
 
   renderShopping();
+}
+
+function findRecipeEntry(recipeId) {
+  const recipe = allRecipes().find((candidate) => candidate.id === recipeId);
+  return recipe ? recipeDetails(recipe) : null;
+}
+
+function openRecipeDetail(recipeId) {
+  const entry = findRecipeEntry(recipeId);
+  if (!entry) return;
+  const { recipe, available, missing, percent } = entry;
+  state.selectedRecipeId = recipe.id;
+
+  elements.detailTitle.textContent = recipe.name;
+  elements.detailProvider.textContent = recipe.provider ? `RECIPE BY ${recipe.provider.toUpperCase()}` : 'YOUR RECIPE';
+  elements.detailMeta.textContent = [recipe.category, recipe.area, `${percent}% inventory match`].filter(Boolean).join(' · ');
+  elements.detailDirections.textContent = recipe.directions || 'Use your preferred preparation method.';
+
+  const imageUrl = safeUrlValue(recipe.image);
+  elements.detailImage.hidden = !imageUrl;
+  if (imageUrl) {
+    elements.detailImage.src = imageUrl;
+    elements.detailImage.alt = recipe.name;
+  } else {
+    elements.detailImage.removeAttribute('src');
+    elements.detailImage.alt = '';
+  }
+
+  const sourceUrl = safeUrlValue(recipe.sourceUrl);
+  elements.detailSource.hidden = !sourceUrl;
+  if (sourceUrl) elements.detailSource.href = sourceUrl;
+
+  elements.detailIngredients.innerHTML = recipe.ingredients.map((ingredient, index) => {
+    const item = state.items.find((candidate) => ingredientMatches(candidate.name, ingredient));
+    const staple = isCommonStaple(ingredient);
+    const status = item ? 'In inventory' : staple ? 'Pantry staple' : 'Missing';
+    const className = item ? 'available' : staple ? 'staple' : 'missing';
+    const measure = recipe.measures?.[index];
+    return `<li>
+      <span><strong>${escapeHtml(ingredient)}</strong>${measure ? `<small>${escapeHtml(measure)}</small>` : ''}</span>
+      <span class="ingredient-badge ${className}">${status}</span>
+    </li>`;
+  }).join('');
+
+  const uniqueAvailable = [...new Map(available.map((match) => [match.item.id, match.item])).values()];
+  elements.consumptionList.innerHTML = uniqueAvailable.length ? uniqueAvailable.map((item) => `
+    <label class="consumption-row">
+      <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(formatQuantity(item))} available</small></span>
+      <span class="consumption-input">
+        <input type="number" min="0" max="${item.quantity}" step="0.01" value="${Math.min(1, item.quantity)}" data-consume-id="${item.id}" aria-label="Amount of ${escapeHtml(item.name)} to use">
+        <em>${escapeHtml(item.unit)}</em>
+      </span>
+    </label>`).join('') : '<p class="no-matches">Add some of this recipe’s ingredients before updating inventory.</p>';
+  elements.cookRecipe.disabled = uniqueAvailable.length === 0;
+  elements.cookRecipe.textContent = uniqueAvailable.length ? 'Cook & update inventory' : 'No matched inventory';
+  elements.recipeDetailDialog.showModal();
+}
+
+function closeRecipeDetail() {
+  elements.recipeDetailDialog.close();
+  state.selectedRecipeId = null;
 }
 
 function addShoppingItems(names) {
@@ -254,11 +345,14 @@ function addShoppingItems(names) {
 
 function renderShopping() {
   elements.shoppingList.innerHTML = state.shopping.map((item) => `
-    <label class="shopping-item ${item.done ? 'done' : ''}">
-      <input type="checkbox" data-shopping-toggle="${escapeHtml(item.id)}" ${item.done ? 'checked' : ''}>
-      <span>${escapeHtml(item.name)}</span>
+    <div class="shopping-item ${item.done ? 'done' : ''}">
+      <label class="shopping-check">
+        <input type="checkbox" data-shopping-toggle="${escapeHtml(item.id)}" ${item.done ? 'checked' : ''}>
+        <span>${escapeHtml(item.name)}</span>
+      </label>
+      <button class="shopping-add" type="button" data-shopping-add="${escapeHtml(item.id)}" aria-label="Add ${escapeHtml(item.name)} to inventory">＋ inventory</button>
       <button type="button" data-shopping-delete="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
-    </label>`).join('');
+    </div>`).join('');
   elements.shoppingEmpty.hidden = state.shopping.length > 0;
   elements.shoppingCount.textContent = state.shopping.filter((item) => !item.done).length;
 }
@@ -328,9 +422,11 @@ function clearErrors() {
   document.querySelectorAll('.invalid').forEach((node) => node.classList.remove('invalid'));
 }
 
-function openForm(item) {
+function openForm(item, shoppingTransferId = null) {
   elements.form.reset();
   clearErrors();
+  state.shoppingTransferId = shoppingTransferId;
+  const editing = Boolean(item?.id);
   elements.id.value = item?.id || '';
   elements.name.value = item?.name || '';
   elements.location.value = item?.location || 'refrigerator';
@@ -338,15 +434,16 @@ function openForm(item) {
   elements.unit.value = item?.unit || 'item';
   elements.expirationDate.value = item?.expirationDate || '';
   elements.notes.value = item?.notes || '';
-  elements.title.textContent = item ? 'Edit item' : 'Add an item';
-  elements.kicker.textContent = item ? 'UPDATE INGREDIENT' : 'NEW INGREDIENT';
-  elements.save.textContent = item ? 'Update item' : 'Save item';
+  elements.title.textContent = editing ? 'Edit item' : 'Add an item';
+  elements.kicker.textContent = shoppingTransferId ? 'FROM SHOPPING LIST' : editing ? 'UPDATE INGREDIENT' : 'NEW INGREDIENT';
+  elements.save.textContent = editing ? 'Update item' : 'Save item';
   elements.dialog.showModal();
   requestAnimationFrame(() => elements.name.focus());
 }
 
 function closeForm() {
   elements.dialog.close();
+  state.shoppingTransferId = null;
   clearErrors();
 }
 
@@ -363,6 +460,7 @@ elements.form.addEventListener('submit', async (event) => {
     notes: elements.notes.value
   };
   const editing = Boolean(body.id);
+  const shoppingTransferId = state.shoppingTransferId;
   elements.save.disabled = true;
   elements.save.textContent = editing ? 'Updating…' : 'Saving…';
   try {
@@ -371,9 +469,13 @@ elements.form.addEventListener('submit', async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
+    if (shoppingTransferId) {
+      state.shopping = state.shopping.filter((item) => item.id !== shoppingTransferId);
+      saveLocal('pantrypal-shopping', state.shopping);
+    }
     closeForm();
     await loadItems();
-    showMessage(editing ? 'Item updated.' : 'Item added.', 'success');
+    showMessage(shoppingTransferId ? 'Shopping item moved into inventory.' : editing ? 'Item updated.' : 'Item added.', 'success');
   } catch (error) {
     Object.entries(error.fields || {}).forEach(([field, message]) => {
       document.querySelector(`[data-error-for="${field}"]`).textContent = message;
@@ -458,7 +560,11 @@ elements.availableOnly.addEventListener('change', () => {
 
 elements.recipeList.addEventListener('click', (event) => {
   const addButton = event.target.closest('[data-recipe-id]');
+  const viewButton = event.target.closest('[data-view-recipe]');
   const deleteButton = event.target.closest('[data-delete-recipe]');
+  const retryButton = event.target.closest('[data-retry-recipes]');
+  if (retryButton) loadExternalRecipes();
+  if (viewButton) openRecipeDetail(viewButton.dataset.viewRecipe);
   if (addButton) {
     const entry = allRecipes().map(recipeDetails).find((candidate) => candidate.recipe.id === addButton.dataset.recipeId);
     if (entry) {
@@ -470,6 +576,37 @@ elements.recipeList.addEventListener('click', (event) => {
     state.customRecipes = state.customRecipes.filter((recipe) => recipe.id !== deleteButton.dataset.deleteRecipe);
     saveLocal('pantrypal-recipes', state.customRecipes);
     renderRecipes();
+  }
+});
+
+document.querySelector('#close-recipe-detail').addEventListener('click', closeRecipeDetail);
+document.querySelector('#cancel-recipe-detail').addEventListener('click', closeRecipeDetail);
+
+elements.recipeDetailForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const items = [...elements.consumptionList.querySelectorAll('[data-consume-id]')]
+    .map((input) => ({ id: Number(input.dataset.consumeId), amount: Number(input.value) }))
+    .filter((item) => Number.isFinite(item.amount) && item.amount > 0);
+  if (!items.length) {
+    showMessage('Choose at least one inventory amount to use.');
+    return;
+  }
+
+  elements.cookRecipe.disabled = true;
+  elements.cookRecipe.textContent = 'Updating inventory…';
+  try {
+    await request('/api/consume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    });
+    closeRecipeDetail();
+    await loadItems();
+    showMessage('Meal cooked — inventory quantities updated.', 'success');
+  } catch (error) {
+    showMessage(error.message);
+    elements.cookRecipe.disabled = false;
+    elements.cookRecipe.textContent = 'Cook & update inventory';
   }
 });
 
@@ -491,10 +628,17 @@ elements.shoppingList.addEventListener('change', (event) => {
 
 elements.shoppingList.addEventListener('click', (event) => {
   const remove = event.target.closest('[data-shopping-delete]');
-  if (!remove) return;
-  state.shopping = state.shopping.filter((item) => item.id !== remove.dataset.shoppingDelete);
-  saveLocal('pantrypal-shopping', state.shopping);
-  renderShopping();
+  const add = event.target.closest('[data-shopping-add]');
+  if (add) {
+    const shoppingItem = state.shopping.find((item) => item.id === add.dataset.shoppingAdd);
+    if (shoppingItem) openForm({ name: shoppingItem.name, location: 'pantry', quantity: 1, unit: 'item', expirationDate: '', notes: 'Added from shopping list' }, shoppingItem.id);
+    return;
+  }
+  if (remove) {
+    state.shopping = state.shopping.filter((item) => item.id !== remove.dataset.shoppingDelete);
+    saveLocal('pantrypal-shopping', state.shopping);
+    renderShopping();
+  }
 });
 
 document.querySelector('#clear-shopping').addEventListener('click', () => {
