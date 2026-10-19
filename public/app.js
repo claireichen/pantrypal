@@ -9,7 +9,8 @@ const state = {
   recipeApiStatus: 'idle',
   recipeFetchToken: 0,
   selectedRecipeId: null,
-  shoppingTransferId: null
+  shoppingTransferId: null,
+  notificationSettings: readObjectLocal('pantrypal-notifications', { days: 3, inApp: true, browser: false })
 };
 
 const elements = {
@@ -50,7 +51,17 @@ const elements = {
   cookRecipe: document.querySelector('#cook-recipe'),
   shoppingList: document.querySelector('#shopping-list'),
   shoppingEmpty: document.querySelector('#shopping-empty'),
-  shoppingCount: document.querySelector('#shopping-count')
+  shoppingCount: document.querySelector('#shopping-count'),
+  notificationDialog: document.querySelector('#notification-dialog'),
+  notificationForm: document.querySelector('#notification-form'),
+  notificationDays: document.querySelector('#notification-days'),
+  inAppNotifications: document.querySelector('#in-app-notifications'),
+  browserNotifications: document.querySelector('#browser-notifications'),
+  browserNotificationStatus: document.querySelector('#browser-notification-status'),
+  enableBrowserNotifications: document.querySelector('#enable-browser-notifications'),
+  notificationBadge: document.querySelector('#notification-badge'),
+  expirationAlert: document.querySelector('#expiration-alert'),
+  expirationAlertCopy: document.querySelector('#expiration-alert-copy')
 };
 
 const locationDetails = {
@@ -71,6 +82,17 @@ function readLocal(key, fallback) {
   try {
     const value = JSON.parse(localStorage.getItem(key));
     return Array.isArray(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readObjectLocal(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    if (!value || Array.isArray(value) || typeof value !== 'object') return fallback;
+    const days = [1, 3, 5, 7].includes(Number(value.days)) ? Number(value.days) : fallback.days;
+    return { days, inApp: value.inApp !== false, browser: value.browser === true };
   } catch {
     return fallback;
   }
@@ -133,6 +155,84 @@ function dateStatus(dateValue) {
   return { label: `Expires ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, className: '' };
 }
 
+function daysUntilExpiration(dateValue) {
+  if (!dateValue) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const date = new Date(`${dateValue}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : Math.round((date - today) / 86400000);
+}
+
+function expiringItems() {
+  return state.items
+    .map((item) => ({ ...item, daysLeft: daysUntilExpiration(item.expirationDate) }))
+    .filter((item) => item.daysLeft !== null && item.daysLeft >= 0 && item.daysLeft <= state.notificationSettings.days)
+    .sort((a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name));
+}
+
+function expirationPhrase(item) {
+  if (item.daysLeft === 0) return `${item.name} expires today`;
+  return `${item.name} expires in ${item.daysLeft} day${item.daysLeft === 1 ? '' : 's'}`;
+}
+
+function renderExpirationAlert() {
+  const items = expiringItems();
+  elements.notificationBadge.textContent = items.length;
+  elements.notificationBadge.hidden = items.length === 0;
+  elements.expirationAlert.hidden = !state.notificationSettings.inApp || items.length === 0;
+  if (!items.length) return;
+  const visible = items.slice(0, 3).map(expirationPhrase);
+  const remainder = items.length - visible.length;
+  elements.expirationAlertCopy.textContent = `${visible.join(' · ')}${remainder ? ` · and ${remainder} more` : ''}.`;
+}
+
+function localDayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function updateNotificationPermissionUI() {
+  const supported = 'Notification' in window;
+  const permission = supported ? Notification.permission : 'unsupported';
+  const copy = {
+    granted: 'Browser notifications are allowed.',
+    denied: 'Browser notifications are blocked. You can change this in your browser settings.',
+    default: 'Permission has not been requested yet.',
+    unsupported: 'This browser does not support desktop notifications.'
+  };
+  elements.browserNotificationStatus.textContent = copy[permission];
+  elements.enableBrowserNotifications.hidden = permission === 'granted' || permission === 'unsupported';
+  elements.enableBrowserNotifications.disabled = permission === 'denied';
+  elements.browserNotifications.disabled = permission !== 'granted';
+  if (permission !== 'granted') elements.browserNotifications.checked = false;
+}
+
+function openNotificationSettings() {
+  elements.notificationDays.value = String(state.notificationSettings.days);
+  elements.inAppNotifications.checked = state.notificationSettings.inApp;
+  elements.browserNotifications.checked = state.notificationSettings.browser && 'Notification' in window && Notification.permission === 'granted';
+  updateNotificationPermissionUI();
+  elements.notificationDialog.showModal();
+}
+
+function maybeSendExpirationNotification() {
+  const items = expiringItems();
+  if (!state.notificationSettings.browser || !items.length || !('Notification' in window) || Notification.permission !== 'granted') return;
+  const today = localDayKey();
+  if (localStorage.getItem('pantrypal-last-notification') === today) return;
+  const visible = items.slice(0, 3).map(expirationPhrase);
+  const remainder = items.length - visible.length;
+  try {
+    new Notification('PantryPal: food expiring soon', {
+      body: `${visible.join('. ')}${remainder ? `. Plus ${remainder} more` : ''}.`,
+      tag: 'pantrypal-expiring'
+    });
+    localStorage.setItem('pantrypal-last-notification', today);
+  } catch {
+    // Some mobile browsers expose the API but require service-worker notifications.
+  }
+}
+
 function filteredItems() {
   const query = state.search.toLowerCase();
   return state.items.filter((item) => {
@@ -179,6 +279,7 @@ function render() {
   for (const location of Object.keys(locationDetails)) {
     document.querySelector(`#${location}-badge`).textContent = state.items.filter((item) => item.location === location).length;
   }
+  renderExpirationAlert();
   renderRecipes();
 }
 
@@ -381,6 +482,7 @@ async function loadItems() {
     const payload = await request('/api/items');
     state.items = payload.items;
     render();
+    maybeSendExpirationNotification();
     await loadExternalRecipes();
   } catch (error) {
     showMessage('Could not load the inventory. Try refreshing the page.');
@@ -645,6 +747,36 @@ document.querySelector('#clear-shopping').addEventListener('click', () => {
   state.shopping = state.shopping.filter((item) => !item.done);
   saveLocal('pantrypal-shopping', state.shopping);
   renderShopping();
+});
+
+document.querySelector('#open-notification-settings').addEventListener('click', openNotificationSettings);
+document.querySelector('#open-notification-settings-banner').addEventListener('click', openNotificationSettings);
+document.querySelector('#close-notification-settings').addEventListener('click', () => elements.notificationDialog.close());
+document.querySelector('#cancel-notification-settings').addEventListener('click', () => elements.notificationDialog.close());
+
+elements.enableBrowserNotifications.addEventListener('click', async () => {
+  if (!('Notification' in window)) return;
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted') {
+    elements.browserNotifications.checked = true;
+    elements.browserNotificationStatus.textContent = 'Browser notifications are allowed. Save settings to turn them on.';
+  }
+  updateNotificationPermissionUI();
+  if (permission === 'granted') elements.browserNotifications.checked = true;
+});
+
+elements.notificationForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  state.notificationSettings = {
+    days: Number(elements.notificationDays.value),
+    inApp: elements.inAppNotifications.checked,
+    browser: elements.browserNotifications.checked && 'Notification' in window && Notification.permission === 'granted'
+  };
+  saveLocal('pantrypal-notifications', state.notificationSettings);
+  elements.notificationDialog.close();
+  renderExpirationAlert();
+  maybeSendExpirationNotification();
+  showMessage('Expiration reminder settings saved.', 'success');
 });
 
 loadItems();

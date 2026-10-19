@@ -17,7 +17,14 @@
         <span class="brand-mark" aria-hidden="true">P</span>
         <span>PantryPal</span>
       </a>
-      <p class="header-note">Your food, in one place</p>
+      <div class="header-actions">
+        <p class="header-note">Your food, in one place</p>
+        <button class="notification-button" id="open-notification-settings" type="button" aria-label="Open expiration notification settings">
+          <span aria-hidden="true">♢</span>
+          <span>Reminders</span>
+          <span class="notification-badge" id="notification-badge" hidden>0</span>
+        </button>
+      </div>
     </header>
 
     <main>
@@ -45,6 +52,15 @@
           <span class="summary-number small" id="location-count">0</span>
           <span class="summary-label">storage areas</span>
         </div>
+      </section>
+
+      <section class="expiration-alert" id="expiration-alert" aria-labelledby="expiration-alert-title" hidden>
+        <span class="expiration-alert-icon" aria-hidden="true">◷</span>
+        <div>
+          <strong id="expiration-alert-title">Use these ingredients soon</strong>
+          <p id="expiration-alert-copy"></p>
+        </div>
+        <button class="text-button" id="open-notification-settings-banner" type="button">Reminder settings</button>
       </section>
 
       <section class="inventory" aria-labelledby="inventory-title">
@@ -268,6 +284,48 @@
             <button class="secondary-button" id="cancel-recipe-detail" type="button">Close</button>
             <button class="primary-button" id="cook-recipe" type="submit">Cook &amp; update inventory</button>
           </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="notification-dialog" class="notification-dialog">
+      <form id="notification-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">EXPIRATION REMINDERS</p>
+            <h2>Notification settings</h2>
+          </div>
+          <button class="icon-button" id="close-notification-settings" type="button" aria-label="Close notification settings">×</button>
+        </div>
+
+        <label class="field field-wide">
+          <span>Remind me when food expires within</span>
+          <select id="notification-days">
+            <option value="1">1 day</option>
+            <option value="3">3 days</option>
+            <option value="5">5 days</option>
+            <option value="7">7 days</option>
+          </select>
+        </label>
+
+        <label class="notification-option">
+          <input id="in-app-notifications" type="checkbox">
+          <span><strong>Show alerts in PantryPal</strong><small>Display a reminder above your inventory when food is about to expire.</small></span>
+        </label>
+
+        <div class="browser-notification-card">
+          <label class="notification-option">
+            <input id="browser-notifications" type="checkbox">
+            <span><strong>Browser notifications</strong><small>Show one expiration reminder per day when PantryPal is opened.</small></span>
+          </label>
+          <p id="browser-notification-status" class="permission-status" role="status"></p>
+          <button id="enable-browser-notifications" class="secondary-button" type="button">Allow browser notifications</button>
+        </div>
+
+        <p class="notification-note">Your preferences are saved on this device. Browser permission can always be changed in your browser settings.</p>
+        <div class="form-actions">
+          <button class="secondary-button" id="cancel-notification-settings" type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save settings</button>
         </div>
       </form>
     </dialog>

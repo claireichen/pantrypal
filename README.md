@@ -8,6 +8,7 @@ PantryPal is a responsive household food inventory for refrigerator, freezer, an
 - Track refrigerator, freezer, and pantry storage
 - Record quantity, unit, expiration date, and notes
 - Highlight expired items and food that should be used within seven days
+- Configure expiration reminders with in-app alerts and optional daily browser notifications
 - Filter by storage location and search by ingredient
 - Recommend recipes using food across all storage locations
 - Prioritize recipes that use ingredients nearing expiration
