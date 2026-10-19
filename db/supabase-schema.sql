@@ -17,8 +17,18 @@ create table if not exists public.custom_recipes (
   name text not null check (char_length(name) between 1 and 80),
   ingredients jsonb not null default '[]'::jsonb,
   directions text not null default '',
+  image_url text not null default '',
   created_at timestamptz not null default now()
 );
+
+alter table public.custom_recipes add column if not exists image_url text not null default '';
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('recipe-images', 'recipe-images', true, 3145728, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 
 create table if not exists public.shopping_items (
   id text primary key,

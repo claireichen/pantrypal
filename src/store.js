@@ -24,6 +24,7 @@ function mapRecipeRow(row) {
     name: row.name,
     ingredients: typeof row.ingredients === 'string' ? JSON.parse(row.ingredients) : row.ingredients,
     directions: row.directions || '',
+    image: row.image_url || '',
     custom: true
   };
 }
@@ -56,6 +57,7 @@ function createSqliteStore(databasePath) {
       name TEXT NOT NULL,
       ingredients TEXT NOT NULL,
       directions TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS shopping_items (
@@ -72,6 +74,8 @@ function createSqliteStore(databasePath) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  const recipeColumns = db.prepare('PRAGMA table_info(custom_recipes)').all().map((column) => column.name);
+  if (!recipeColumns.includes('image_url')) db.exec("ALTER TABLE custom_recipes ADD COLUMN image_url TEXT NOT NULL DEFAULT ''");
 
   const listStatement = db.prepare(`
     SELECT * FROM items
@@ -90,9 +94,10 @@ function createSqliteStore(databasePath) {
   const deleteStatement = db.prepare('DELETE FROM items WHERE id = ?');
   const listRecipesStatement = db.prepare('SELECT * FROM custom_recipes ORDER BY created_at DESC');
   const createRecipeStatement = db.prepare(`
-    INSERT INTO custom_recipes (id, name, ingredients, directions) VALUES (?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET name = excluded.name, ingredients = excluded.ingredients, directions = excluded.directions
+    INSERT INTO custom_recipes (id, name, ingredients, directions, image_url) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, ingredients = excluded.ingredients, directions = excluded.directions, image_url = excluded.image_url
   `);
+  const getRecipeStatement = db.prepare('SELECT * FROM custom_recipes WHERE id = ?');
   const deleteRecipeStatement = db.prepare('DELETE FROM custom_recipes WHERE id = ?');
   const listShoppingStatement = db.prepare('SELECT * FROM shopping_items ORDER BY created_at ASC');
   const createShoppingStatement = db.prepare(`
@@ -149,8 +154,12 @@ function createSqliteStore(databasePath) {
       };
     },
     async createRecipe(recipe) {
-      createRecipeStatement.run(recipe.id, recipe.name, JSON.stringify(recipe.ingredients), recipe.directions);
+      createRecipeStatement.run(recipe.id, recipe.name, JSON.stringify(recipe.ingredients), recipe.directions, recipe.image || '');
       return recipe;
+    },
+    async getRecipe(id) {
+      const row = getRecipeStatement.get(id);
+      return row ? mapRecipeRow(row) : null;
     },
     async removeRecipe(id) {
       return deleteRecipeStatement.run(id).changes > 0;
@@ -258,9 +267,13 @@ function createSupabaseStore(url, serviceRoleKey) {
       const rows = await request('custom_recipes', '', {
         method: 'POST',
         headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify({ id: recipe.id, name: recipe.name, ingredients: recipe.ingredients, directions: recipe.directions })
+        body: JSON.stringify({ id: recipe.id, name: recipe.name, ingredients: recipe.ingredients, directions: recipe.directions, image_url: recipe.image || '' })
       });
       return mapRecipeRow(rows[0]);
+    },
+    async getRecipe(id) {
+      const rows = await request('custom_recipes', `?select=*&id=eq.${encodeURIComponent(id)}`);
+      return rows.length ? mapRecipeRow(rows[0]) : null;
     },
     async removeRecipe(id) {
       const rows = await request('custom_recipes', `?id=eq.${encodeURIComponent(id)}`, {

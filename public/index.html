@@ -241,9 +241,17 @@
           <span>Directions <small>optional</small></span>
           <textarea id="recipe-directions" maxlength="800" rows="4" placeholder="Brief preparation notes…"></textarea>
         </label>
+        <label class="field field-wide recipe-photo-field">
+          <span>Recipe photo <small>optional · JPG, PNG, or WebP</small></span>
+          <input id="recipe-image" type="file" accept="image/jpeg,image/png,image/webp">
+        </label>
+        <div class="recipe-image-preview" id="recipe-image-preview" hidden>
+          <img id="recipe-image-preview-img" alt="Selected recipe preview">
+          <button class="secondary-button" id="remove-recipe-image" type="button">Remove photo</button>
+        </div>
         <div class="form-actions">
           <button class="secondary-button" id="cancel-recipe-form" type="button">Cancel</button>
-          <button class="primary-button" type="submit">Save recipe</button>
+          <button class="primary-button" id="save-recipe" type="submit">Save recipe</button>
         </div>
       </form>
     </dialog>

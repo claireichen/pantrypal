@@ -6,6 +6,7 @@ const {
   validateShoppingItem,
   validateNotificationSettings
 } = require('../src/validation');
+const { uploadRecipeImage, removeRecipeImage } = require('../src/image-storage');
 
 function send(res, status, payload) {
   res.statusCode = status;
@@ -19,7 +20,7 @@ async function readBody(req) {
   let body = '';
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 1_000_000) throw new Error('Request body is too large.');
+    if (body.length > 5_000_000) throw Object.assign(new Error('Request body is too large.'), { statusCode: 413 });
   }
   return body ? JSON.parse(body) : {};
 }
@@ -53,9 +54,9 @@ async function handler(req, res) {
       const body = await readBody(req);
       if (body.type === 'recipe') {
         const result = validateCustomRecipe(body.recipe);
-        return result.valid
-          ? send(res, 201, { recipe: await database.createRecipe(result.recipe) })
-          : send(res, 400, { error: 'Enter a recipe name and at least one ingredient.', fields: result.errors });
+        if (!result.valid) return send(res, 400, { error: 'Enter a recipe name and at least one ingredient.', fields: result.errors });
+        result.recipe.image = await uploadRecipeImage(body.imageDataUrl);
+        return send(res, 201, { recipe: await database.createRecipe(result.recipe) });
       }
       if (body.type === 'shopping') {
         const result = validateShoppingItem(body.item);
@@ -88,11 +89,14 @@ async function handler(req, res) {
         return send(res, 200, { removed: await database.clearCompletedShopping() });
       }
       if (!validIdentifier(id)) return send(res, 400, { error: 'A valid ID is required.' });
-      const removed = type === 'recipe'
-        ? await database.removeRecipe(id)
-        : type === 'shopping'
-          ? await database.removeShoppingItem(id)
-          : false;
+      let removed = false;
+      if (type === 'recipe') {
+        const recipe = await database.getRecipe(id);
+        removed = await database.removeRecipe(id);
+        if (removed && recipe?.image) await removeRecipeImage(recipe.image).catch(() => {});
+      } else if (type === 'shopping') {
+        removed = await database.removeShoppingItem(id);
+      }
       return removed ? send(res, 200, { success: true }) : send(res, 404, { error: 'Saved data not found.' });
     }
 
@@ -100,8 +104,8 @@ async function handler(req, res) {
     return send(res, 405, { error: 'Method not allowed.' });
   } catch (error) {
     console.error(error);
-    const status = error instanceof SyntaxError ? 400 : 500;
-    return send(res, status, { error: status === 400 ? 'Invalid JSON body.' : 'The saved data could not be updated.' });
+    const status = error.statusCode || (error instanceof SyntaxError ? 400 : 500);
+    return send(res, status, { error: status === 400 ? error.message : status === 413 ? 'The recipe photo is too large.' : 'The saved data could not be updated.' });
   }
 }
 

@@ -43,6 +43,17 @@ function cleanIdentifier(value) {
   return /^[a-zA-Z0-9._-]{1,100}$/.test(identifier) ? identifier : '';
 }
 
+function cleanImageUrl(value) {
+  if (typeof value !== 'string' || value.length > 600) return '';
+  if (/^\/uploads\/[a-zA-Z0-9._-]+$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
 function validateCustomRecipe(input = {}) {
   const ingredients = Array.isArray(input.ingredients)
     ? input.ingredients.map((value) => cleanText(value, 100)).filter(Boolean).slice(0, 40)
@@ -52,6 +63,7 @@ function validateCustomRecipe(input = {}) {
     name: cleanText(input.name, 80),
     ingredients,
     directions: cleanText(input.directions, 800),
+    image: cleanImageUrl(input.image),
     custom: true
   };
   const errors = {};

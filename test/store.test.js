@@ -40,7 +40,12 @@ test('SQLite store persists recipes, shopping items, and notification settings',
   });
 
   await store.createRecipe({
-    id: 'custom-soup', name: 'Soup', ingredients: ['carrot', 'onion'], directions: 'Simmer.', custom: true
+    id: 'custom-soup',
+    name: 'Soup',
+    ingredients: ['carrot', 'onion'],
+    directions: 'Simmer.',
+    image: 'https://example.com/soup.webp',
+    custom: true
   });
   await store.createShoppingItem({ id: 'shopping-carrot', name: 'Carrot', done: false });
   await store.updateNotificationSettings({ days: 5, inApp: true, browser: true });
@@ -48,6 +53,7 @@ test('SQLite store persists recipes, shopping items, and notification settings',
   let data = await store.getUserData();
   assert.equal(data.customRecipes[0].name, 'Soup');
   assert.deepEqual(data.customRecipes[0].ingredients, ['carrot', 'onion']);
+  assert.equal(data.customRecipes[0].image, 'https://example.com/soup.webp');
   assert.equal(data.shopping[0].done, false);
   assert.deepEqual(data.notificationSettings, { days: 5, inApp: true, browser: true });
 

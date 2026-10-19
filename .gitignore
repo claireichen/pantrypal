@@ -7,4 +7,5 @@ data/*.sqlite-wal
 coverage/
 .vercel/
 outputs/
+public/uploads/
 

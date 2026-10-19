@@ -37,6 +37,10 @@ const elements = {
   recipeList: document.querySelector('#recipe-list'),
   recipeSummary: document.querySelector('#recipe-summary'),
   recipeProvider: document.querySelector('#recipe-provider'),
+  recipeImage: document.querySelector('#recipe-image'),
+  recipeImagePreview: document.querySelector('#recipe-image-preview'),
+  recipeImagePreviewImg: document.querySelector('#recipe-image-preview-img'),
+  saveRecipe: document.querySelector('#save-recipe'),
   availableOnly: document.querySelector('#available-only'),
   recipeDetailDialog: document.querySelector('#recipe-detail-dialog'),
   recipeDetailForm: document.querySelector('#recipe-detail-form'),
@@ -71,6 +75,7 @@ const locationDetails = {
 };
 
 const commonStaples = ['water', 'salt', 'pepper', 'oil', 'sugar'];
+let recipePreviewUrl = '';
 
 function escapeHtml(value) {
   const node = document.createElement('div');
@@ -115,11 +120,47 @@ function isCommonStaple(ingredient) {
 
 function safeUrlValue(value) {
   if (!value) return '';
+  if (/^\/uploads\/[a-zA-Z0-9._-]+$/.test(value)) return value;
   try {
     const url = new URL(value);
     return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
   } catch {
     return '';
+  }
+}
+
+function resetRecipeImage() {
+  if (recipePreviewUrl) URL.revokeObjectURL(recipePreviewUrl);
+  recipePreviewUrl = '';
+  elements.recipeImage.value = '';
+  elements.recipeImagePreviewImg.removeAttribute('src');
+  elements.recipeImagePreview.hidden = true;
+}
+
+async function prepareRecipeImage(file) {
+  if (!file) return '';
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Choose a JPG, PNG, or WebP image.');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Choose an image smaller than 8 MB.');
+  const sourceUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = sourceUrl;
+    await image.decode();
+    const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
+    if (!blob) throw new Error('The photo could not be prepared.');
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('The photo could not be read.'));
+      reader.readAsDataURL(blob);
+    });
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
   }
 }
 
@@ -671,11 +712,28 @@ document.querySelector('#confirm-delete').addEventListener('click', async (event
 
 document.querySelector('#open-recipe-form').addEventListener('click', () => {
   elements.recipeForm.reset();
+  resetRecipeImage();
   elements.recipeDialog.showModal();
   requestAnimationFrame(() => document.querySelector('#recipe-name').focus());
 });
 document.querySelector('#close-recipe-form').addEventListener('click', () => elements.recipeDialog.close());
 document.querySelector('#cancel-recipe-form').addEventListener('click', () => elements.recipeDialog.close());
+
+elements.recipeImage.addEventListener('change', () => {
+  const file = elements.recipeImage.files[0];
+  if (!file) return resetRecipeImage();
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    resetRecipeImage();
+    showMessage('Choose a JPG, PNG, or WebP image.');
+    return;
+  }
+  if (recipePreviewUrl) URL.revokeObjectURL(recipePreviewUrl);
+  recipePreviewUrl = URL.createObjectURL(file);
+  elements.recipeImagePreviewImg.src = recipePreviewUrl;
+  elements.recipeImagePreview.hidden = false;
+});
+
+document.querySelector('#remove-recipe-image').addEventListener('click', resetRecipeImage);
 
 elements.recipeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -683,11 +741,14 @@ elements.recipeForm.addEventListener('submit', async (event) => {
   const ingredients = document.querySelector('#recipe-ingredients').value.split(',').map((value) => value.trim()).filter(Boolean);
   const directions = document.querySelector('#recipe-directions').value.trim();
   if (!name || !ingredients.length) return;
+  elements.saveRecipe.disabled = true;
   try {
+    elements.saveRecipe.textContent = elements.recipeImage.files[0] ? 'Uploading photo…' : 'Saving…';
+    const imageDataUrl = await prepareRecipeImage(elements.recipeImage.files[0]);
     const payload = await request('/api/user-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'recipe', recipe: { name, ingredients, directions } })
+      body: JSON.stringify({ type: 'recipe', recipe: { name, ingredients, directions }, imageDataUrl })
     });
     state.customRecipes.unshift(payload.recipe);
     elements.recipeDialog.close();
@@ -695,6 +756,9 @@ elements.recipeForm.addEventListener('submit', async (event) => {
     showMessage('Recipe saved to your cloud database.', 'success');
   } catch (error) {
     showMessage(error.message);
+  } finally {
+    elements.saveRecipe.disabled = false;
+    elements.saveRecipe.textContent = 'Save recipe';
   }
 });
 
